@@ -2,12 +2,15 @@ from time import sleep
 import pyvisa
 import os
 import csv
+from datetime import datetime
+import sys
 
 Settings = {
+    "group_name" : "G7_2023",
     # test parameters
     "v_min" : 2.5,
     "v_max" : 4.2,
-    "i_sequence" : [[10, 0],[2, 2]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s
+    "i_sequence" : [[10, 0],[2, 2]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
     "slew_rate" : 0.1,      # A/us
     # oscilloscope settings
     "v_channel" : 1,    # which Oscope channel is measuring cell voltage?
@@ -15,17 +18,26 @@ Settings = {
     "i_scale_factor" : 3,   # scale factor for current monitor output from load
 }
 
-Cell_data = {
-    "num" : int,
-    "res_st" : float,
-    "res_lt" : float,
-}
+def debug(str, forcePrint = False):
+    log(str)
+    if '-v' in sys.argv or forcePrint:
+        print(str)
+    return
+
+def log(str):
+    dt_str = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+    with open("log.txt", "a") as logFile:
+        logFile.write(f'{dt_str}: {str}\n')
+
+def errors(str_list, source = ''):
+    for str in str_list:
+        log(f'ERROR:{source}: {str}')
+        print(str)
+    return
 
 class Load:
     def __init__(self, load_res):
         self.load_res = load_res
-        print('Setting up load...')
-        sleep(0.5)
 
         self.write('*RST')      # reset to default settings
         self.write('FUNCtion:MODE FIXed')       # it has to be in fixed mode to set up the list
@@ -43,60 +55,84 @@ class Load:
             self.write(f"LIST:SLEW:BOTH {i}, {Settings['slew_rate']}")        # slew rate (A/us)
         self.write('FUNCtion:MODE LIST')    # now we can switch to list mode
         self.write('TRIGger:SOURce BUS')    # we want to trigger the load over VISA
-        
+
     def write(self, str:str):
-        print(f'    sending to load: {str}')
+        debug(f'    sending to load: {str}')
         self.load_res.write(str)
-        err = self.load_res.query('SYSTem:ERRor?')
-        while (err.split(',')[0] != '0'):
-            print(f'ERROR: {err}')
-            err = self.load_res.query('SYSTem:ERRor?')
+        sleep(0.1)
+        err = self.ll_query('SYSTem:ERRor?').split(',')
+        while (err[0] != '0'):
+            errors(err, 'load')
+            sleep(0.1)
+            err = self.ll_query('SYSTem:ERRor?')
+
+    def ll_query(self, str:str):
+        debug(f'    asking load: {str}')
+        reply = self.load_res.query(str)
+        debug(f'    load replied: {reply}')
+        return reply
 
     def trigger(self):
         self.write('INP 1')     # we have to enable input, otherwise it'll run through the list but not actually draw any current
         self.write('*TRG')    # this starts the list
-        sleep(sum(Settings['i_sequence'][1]) + 1)   # wait for the list to finish
+        sleep(sum(Settings['i_sequence'][1]) + 1.5)   # wait for the list to finish
         self.write('INP 0')    # disable input again just to be safe
 
     def i(self):
-        i = float(self._res.query('FETCh:CURRent?'))
+        i = float(self.ll_query('FETCh:CURRent?'))
         return i
     
     def v(self):
-        v = float(self.load_res.query('FETCh:VOLTage?'))
+        v = float(self.ll_query('FETCh:VOLTage?'))
         return v
     
 class Oscope:
     def __init__(self, scope_res):
         self.scope_res = scope_res
-        sleep(0.5)
-        self.scope_res.query('*ESR?')   # clear any errors left over from initialization
+        self.prev_settings = self.get_current_settings()
 
     def write(self, str:str):
-        print(f'    sending to scope: {str}')
+        debug(f'    sending to scope: {str}')
         self.scope_res.write(str)
         self.scope_res.write('*OPC')    # tell it to let us know when it's done processing the command
-        errors = False
-        done = False
+        errors = done = False
         while not done:
             sleep(0.1)
-            esr = int(self.scope_res.query('*ESR?'))    # check the event status register (this also clears it)
+            esr = int(self.ll_query('*ESR?'))    # check the event status register (this also clears it)
             if esr & 0b00111100 != 0:   # bits 2-5 represent errors
                 errors = True
-                errs = self.scope_res.query('ALLEV?')   # get the error messages
+                errs = self.ll_query('ALLEV?')   # get the error messages
                 errs = errs.split(',')
-                print(errs)
+                errors(errs)
             done = bool(esr & 0b1)  # when bit 0 is set it means it's finished processing the command
         return errors
     
+    def ll_query(self, str:str):
+        debug(f'    asking scope: {str}')
+        reply = self.scope_res.query(str)
+        debug(f'    scope replied: {reply}')
+        return reply
+    
+    def get_current_settings(self):
+        return self.scope_res.query('SET?')
+    
+    def restore_settings(self, settings = ''):
+        if settings == '':
+            settings = self.prev_settings
+        self.scope_res.write(settings)
+    
     def query_value(self, scpi_str:str):
-        reply_str = self.scope_res.query(scpi_str)
+        # self.scope_res.write(scpi_str)
+        reply_str = self.ll_query(scpi_str)
         reply_str = reply_str.split('E')   # it sometimes returns values in scientific notation
         if len(reply_str) == 2:
-            value = float(reply_str[0]) ** float(reply_str[1])
+            value = float(reply_str[0]) * (10 ** int(reply_str[1]))
         else:
-            value = reply_str[0]
+            value = float(reply_str[0])
         return value
+    
+    def times_triggered(self):
+        return int(self.ll_query('ACQuire:NUMACq?'))
 
     def set_acq_duration_s(self, secs:float):
         secs = secs + 1
@@ -105,22 +141,26 @@ class Oscope:
         div_per_sec = 1 / sec_per_div
         self.write(f'HORizontal:POSition {(0.5 * div_per_sec):.4E}')
 
-    def set_v_range(self, channel:int, v_min:float, v_max:float): ##########################################################################################
+    def set_v_range(self, channel:int, v_min:float, v_max:float):
         v_range = v_max - v_min
         v_per_div = v_range / 10
         self.write(f'CH{channel}:SCAle {v_per_div:.4E}')
-        self.write(f'CH{channel}:POSition {-1 * (5 + v_min / v_per_div)}')
+        pos_offset = -1 * (5 + v_min / v_per_div)
+        if -10 < pos_offset < 10:
+            self.write(f'CH{channel}:POSition {-1 * (5 + v_min / v_per_div)}')
+        else:
+            self.write(f'CH{channel}:OFFSET {(v_range / 2 + v_min):.4E}')
 
     def measure_resistance_at(self, step:int, freq:float):
         t_values = [0]
         for i in range(len(Settings['i_sequence'][1])):
             t_values.append(t_values[i] + Settings['i_sequence'][1][i])
 
-        a_time = t_values[step] - (1/freq)
-        b_time = t_values[step] + (1/freq)
+        a_time = t_values[step] - (0.5/freq)
+        b_time = t_values[step] + (0.5/freq)
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.4E}')
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.4E}')
-        dv = self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?')
+        dv = -(self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?'))
 
         i_values = [0] + Settings['i_sequence'][0] + [0]
         di = i_values[step + 1] - i_values[step]
@@ -132,8 +172,8 @@ class Oscope:
         for i in range(len(Settings['i_sequence'][1])):
             t_values.append(t_values[i] + Settings['i_sequence'][1][i])
 
-        a_time = t_values[step] + 1e-3
-        b_time = t_values[step + 1] + 1e-3
+        a_time = t_values[step] - 1e-3
+        b_time = t_values[step + 1] - 1e-3
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.4E}')
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.4E}')
         dv = self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?')
@@ -144,7 +184,7 @@ class Oscope:
         return dv / di
         
     def min(self):
-        min = float(self.scope_res.query('MEASUrement:MEAS:RESUlts:CURRentacq:MINimum?'))
+        min = self.query_value('MEASUrement:MEAS:RESUlts:CURRentacq:MINimum?')
         return min
 
     def recall_setup(self, setup_name:str):
@@ -182,94 +222,100 @@ for i in range(len(visa_list)):
             if load_res == {}:
                 instr.query('source:current?')      # if it has a current setting, it's probably the load
                 i_source = instr.query('*IDN?')
-                print(f'found load: {i_source}')
+                debug(f'Found load: {i_source}', True)
                 load_res = instr
         except:
             try:
                 if scope_res == {}:
+                    instr.query('*ESR?')    # the scope will have errors from the previous source command, this clears them
+                    instr.query('ALLEV?')
                     oscope_id = instr.query('*IDN?')        # if it's a VISA instrument and it's not the load, we'll assume it's the scope
-                    print(f'found oscope: {oscope_id}')     # there should be a better way to do this but this'll work for now
+                    debug(f'Found oscilloscope: {oscope_id}', True)     # there should be a better way to do this but this'll work ¯\_(ツ)_/¯
                     scope_res = instr
             except:
-                print(f"Couldn't read ID from {visa_list[i]}. IDKWTFIGO ¯\_(ツ)_/¯")
+                errors([f"Couldn't read ID from {visa_list[i]}. IDKWTFIGO ¯\_(ツ)_/¯"])
     except:
-        print(f'{visa_list[i]} is not a VISA instrument. Skipping...')      # any serial ports will show up even if they're not VISA instruments
-    
+        debug(f'{visa_list[i]} is not a VISA instrument. Skipping...')      # any serial ports will show up even if they're not VISA instruments
     
 scope = Oscope(scope_res)
 load = Load(load_res)
 
+try:
+    path = os.path.dirname(os.path.realpath(__file__))      # get the path this Python file is in
+    scope.cd(path)
+    scope.recall_setup('scope_setup.set')
+    scope.write('HORizontal:MODE MANual')    # manual mode allows us to set the acquisition time precisely
+    duration_s = sum(Settings['i_sequence'][1])     # add up the time values to get the total duration
+    scope.set_acq_duration_s(duration_s)   # we want the acquisition time to be 2x as long as the actual discharge so we capture the recovery period.
+    scope.set_v_range(Settings['v_channel'], Settings['v_min'], Settings['v_max'])
+    scope.set_v_range(Settings['i_channel'], -0.1, (max(Settings['i_sequence'][0]) / Settings['i_scale_factor']) + 1)
 
-print('Setting up oscilloscope...')
-path = os.path.dirname(os.path.realpath(__file__))      # get the path this Python file is in
-scope.cd(path)
-scope.recall_setup('scope_setup.set')
-scope.write('HORizontal:MODE MANual')    # manual mode allows us to set the acquisition time precisely
-duration_s = sum(Settings['i_sequence'][1])     # add up the time values to get the total duration
-scope.set_acq_duration_s(duration_s)   # we want the acquisition time to be 2x as long as the actual discharge so we capture the recovery period. add a 1- second buffer
-# scope.set_v_range(Settings['v_channel'], Settings['v_min'], Settings['v_max'])       #########################
-scope.set_v_range(Settings['i_channel'], -0.1, (max(Settings['i_sequence'][0]) / Settings['i_scale_factor']) + 1)      ######################### these are broken!
+    if not os.path.exists(f"{path}\{Settings['group_name']}"):     # make a folder for the data if it doesn't already exist
+        scope.mkdir(f"{Settings['group_name']}")
+    scope.cd(f"{path}\{Settings['group_name']}")
 
-if not os.path.exists(path + '\cell_data'):     # make a folder for the data if it doesn't already exist
-    scope.mkdir('cell_data')
-scope.cd(path + '\cell_data')
+    cell_data = []
+    if not os.path.exists(f"{Settings['group_name']}.csv"):     # make a CSV file for the data if it doesn't already exist
+        with open(f"{Settings['group_name']}.csv", 'w') as csvfile:
+            csvfile.write('num,res_st,res_lt\n')
+    else:
+        with open(f"{Settings['group_name']}.csv", 'r') as csvfile:
+            reader = csv.reader(csvfile)
+            header = next(reader)
+            for row in reader:
+                cell = {header[i]: float(value) for i, value in enumerate(row)}
+                cell_data.append(cell)
+        debug(f'Loaded previous test data for {len(cell_data)} cells.', True)
 
-cell_data = []
-if not os.path.exists('big_list.csv'):     # make a CSV file for the data if it doesn't already exist
-    with open('big_list.csv', 'w', newline = '') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['num', 'res_st', 'res_lt'])
-else:
-    with open('big_list.csv', 'r') as csvfile:
-        reader = csv.reader(csvfile)
-        header = next(reader)
-        for row in reader:
-            cell = {header[i]: float(value) for i, value in enumerate(row)}
-            cell_data.append(cell)
+    while True:
+        cell_num = int(input('Enter cell number: '))
+        try:
+            all_lt_res = [cell['res_lt'] for cell in cell_data]
+            mean_lt_res = sum(all_lt_res) / len(all_lt_res)
+        except:
+            mean_lt_res = 0
+        v0 = load.v()
+        inp = {}
+        if v0 - max(Settings['i_sequence'][0]) * mean_lt_res < Settings['v_min']:
+            while inp != 'Y' and inp != 'y' and inp != 'N' and inp != 'n':
+                inp = input(f'Cell voltage is only {v0:.2f}. It may drop below the minimum of {Settings["v_min"]:.2f}. Continue? [Y/N]')
+        if inp == 'Y' or inp == 'y' or inp == {}:
+            # scope.mkdir(f'cell_{cell_num:03d}')     # make a folder for the cell
+            # scope.cd(f'cell_{cell_num:03d}')    # and switch to it
 
-while True:
-    cell_num = int(input('Enter cell number: '))
+            times = scope.times_triggered()
+            load.trigger()
+            if not scope.times_triggered() > times:
+                errors(['Oscilloscope was not triggered.'])
+            else:
+                scope.save_waveforms(f'cell_{cell_num:03d}_{datetime.now().strftime("%Y-%m-%d  %H-%M-%S")}')
 
-    v0 = load.v()
-    v_drop = 0
-    inp = {}
-    if v0 - v_drop < Settings['v_min']:
-        while inp != 'Y' and inp != 'y' and inp != 'N' and inp != 'n':
-            inp = input(f'Cell voltage is only {v0:.2f}. It may drop below the minimum of {Settings["v_min"]:.2f}. Continue? [Y/N]')
-    if inp == 'Y' or inp == 'y' or inp == {}:
-        # scope.mkdir(f'cell_{cell_num:03d}')     # make a folder for the cell
-        # scope.cd(f'cell_{cell_num:03d}')    # and switch to it
+                dip_v = scope.min()
+                if dip_v < Settings['v_min']:
+                    debug(f'OMG! Cell voltage dipped to {dip_v:.2f} which is below minimum!', True)
 
-        load.trigger()
+                res_st = scope.measure_resistance_at(1, 2000)
+                res_lt = scope.measure_resistance_over(0)
+                cell_data.append({"num": cell_num, "res_st": res_st, "res_lt": res_lt})
+                with open(f"{Settings['group_name']}.csv", 'a', newline = '') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow([f'{cell_num:03d}', res_st, res_lt])
+                cells_tested = len(cell_data)
+                cell_data_sorted_st = sorted(cell_data, key=lambda k: k['res_st'])
+                cell_data_sorted_lt = sorted(cell_data, key=lambda k: k['res_lt'])
+                # find the rank of the current cell
+                rank_st = rank_lt = 0
+                for i in range(cells_tested):
+                    if cell_data_sorted_st[i]['num'] == cell_num:
+                        rank_st = i + 1
+                    if cell_data_sorted_lt[i]['num'] == cell_num:
+                        rank_lt = i + 1
+                print(f'              2 kHz             {Settings["i_sequence"][1][0]} sec')
+                print(f'Resistance: {res_st * 1000 :.3f}e-3         {res_lt * 1000 :.3f}e-3')
+                print(f'Rank:        {rank_st} of {cells_tested}            {rank_lt} of {cells_tested}')
+                print(f'Percentile:   {rank_st / cells_tested * 100:.0f}%               {rank_lt / cells_tested * 100:.0f}%\n')
 
-        scope.save_waveforms(f'cell_{cell_num:03d}')
-
-        dip_v = scope.min()
-        if dip_v < Settings['v_min']:
-            print(f'OMG! Cell voltage dipped to {dip_v} which is below minimum!')
-
-        v_drop = v0 - dip_v
-
-
-        res_st = scope.measure_resistance_at(0, 2000)
-        res_lt = scope.measure_resistance_over(0)
-        cell_data.append({"num": cell_num, "res_st": res_st, "res_lt": res_lt})
-        with open('big_list.csv', 'a', newline = '') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow([f'{cell_num:03d}', res_st, res_lt])
-        cells_tested = len(cell_data)
-        cell_data_sorted_st = sorted(cell_data, key=lambda k: k['res_st'])
-        cell_data_sorted_lt = sorted(cell_data, key=lambda k: k['res_lt'])
-        # find the rank of the current cell
-        rank_st = 0
-        rank_lt = 0
-        for i in range(cells_tested):
-            if cell_data_sorted_st[i]['num'] == cell_num:
-                rank_st = i + 1
-            if cell_data_sorted_lt[i]['num'] == cell_num:
-                rank_lt = i + 1
-        print(f'Resistance: {res_st:.3E}         {res_lt:.3E}')
-        print(f'Rank:       {rank_st} of {cells_tested}    {rank_lt} of {cells_tested}')
-        print(f'Percentile: {rank_st / cells_tested * 100:.0f}%          {rank_lt / cells_tested * 100:.0f}%')
-
-        # scope.cd('..')      # go back up a directory
+                # scope.cd('..')      # go back up a directory
+finally:
+    load.write('INP 0')
+    scope.restore_settings()
