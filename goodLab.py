@@ -10,7 +10,7 @@ Settings = {
     # test parameters
     "v_min" : 2.5,
     "v_max" : 4.2,
-    "i_sequence" : [[10, 0],[2, 2]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
+    "i_sequence" : [[10, 0],[20, 20]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
     "slew_rate" : 0.1,      # A/us
     # oscilloscope settings
     "v_channel" : 1,    # which Oscope channel is measuring cell voltage?
@@ -31,7 +31,8 @@ def log(str):
 
 def errors(str_list, source = ''):
     for str in str_list:
-        log(f'ERROR:{source}: {str}')
+        str = f'ERROR:{source}: {str}'
+        log(str)
         print(str)
     return
 
@@ -103,7 +104,7 @@ class Oscope:
                 errors = True
                 errs = self.ll_query('ALLEV?')   # get the error messages
                 errs = errs.split(',')
-                errors(errs)
+                errors(errs, 'scope')
             done = bool(esr & 0b1)  # when bit 0 is set it means it's finished processing the command
         return errors
     
@@ -122,7 +123,6 @@ class Oscope:
         self.scope_res.write(settings)
     
     def query_value(self, scpi_str:str):
-        # self.scope_res.write(scpi_str)
         reply_str = self.ll_query(scpi_str)
         reply_str = reply_str.split('E')   # it sometimes returns values in scientific notation
         if len(reply_str) == 2:
@@ -156,8 +156,8 @@ class Oscope:
         for i in range(len(Settings['i_sequence'][1])):
             t_values.append(t_values[i] + Settings['i_sequence'][1][i])
 
-        a_time = t_values[step] - (0.5/freq)
-        b_time = t_values[step] + (0.5/freq)
+        a_time = t_values[step] - (0.5 / freq)
+        b_time = t_values[step] + (0.5 / freq)
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.4E}')
         self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.4E}')
         dv = -(self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?'))
@@ -199,13 +199,6 @@ class Oscope:
     def save_waveforms(self, filename:str):
         self.write(f'SAVE:WAVEFORM CH{Settings["v_channel"]}, "{filename}_V.mat"')
         self.write(f'SAVE:WAVEFORM CH{Settings["i_channel"]}, "{filename}_I.mat"')
-    
-    # def pull_data(self, channel, start, end):
-    #     self.write(f'DATa:SOUrce CH{channel}')
-    #     self.write(f'DATa:STARt {start}')
-    #     self.write(f'DATa:STOP {end}')
-    #     data = self.oscope.query_binary_values('CURVe?', datatype='f', container=np.array)
-    #     return data
 
 
 #############################################################################################################
@@ -233,7 +226,7 @@ for i in range(len(visa_list)):
                     debug(f'Found oscilloscope: {oscope_id}', True)     # there should be a better way to do this but this'll work ¯\_(ツ)_/¯
                     scope_res = instr
             except:
-                errors([f"Couldn't read ID from {visa_list[i]}. IDKWTFIGO ¯\_(ツ)_/¯"])
+                errors([f"Couldn't read ID from {visa_list[i]}. ¯\_(ツ)_/¯"])
     except:
         debug(f'{visa_list[i]} is not a VISA instrument. Skipping...')      # any serial ports will show up even if they're not VISA instruments
     
@@ -246,7 +239,7 @@ try:
     scope.recall_setup('scope_setup.set')
     scope.write('HORizontal:MODE MANual')    # manual mode allows us to set the acquisition time precisely
     duration_s = sum(Settings['i_sequence'][1])     # add up the time values to get the total duration
-    scope.set_acq_duration_s(duration_s)   # we want the acquisition time to be 2x as long as the actual discharge so we capture the recovery period.
+    scope.set_acq_duration_s(duration_s)
     scope.set_v_range(Settings['v_channel'], Settings['v_min'], Settings['v_max'])
     scope.set_v_range(Settings['i_channel'], -0.1, (max(Settings['i_sequence'][0]) / Settings['i_scale_factor']) + 1)
 
@@ -257,18 +250,21 @@ try:
     cell_data = []
     if not os.path.exists(f"{Settings['group_name']}.csv"):     # make a CSV file for the data if it doesn't already exist
         with open(f"{Settings['group_name']}.csv", 'w') as csvfile:
-            csvfile.write('num,res_st,res_lt\n')
+            csvfile.write('num,v0,res_st,res_lt\n')
+            header = ['num','v0', 'res_st', 'res_lt']
     else:
         with open(f"{Settings['group_name']}.csv", 'r') as csvfile:
             reader = csv.reader(csvfile)
             header = next(reader)
             for row in reader:
-                cell = {header[i]: float(value) for i, value in enumerate(row)}
+                cell = {header[i]: float(value_str) for i, value_str in enumerate(row)}
                 cell_data.append(cell)
         debug(f'Loaded previous test data for {len(cell_data)} cells.', True)
 
+#########################################################################################################################
+
     while True:
-        cell_num = int(input('Enter cell number: '))
+        cell_num = int(input('\nEnter cell number: '))
         try:
             all_lt_res = [cell['res_lt'] for cell in cell_data]
             mean_lt_res = sum(all_lt_res) / len(all_lt_res)
@@ -286,7 +282,7 @@ try:
             times = scope.times_triggered()
             load.trigger()
             if not scope.times_triggered() > times:
-                errors(['Oscilloscope was not triggered.'])
+                errors(['Oscilloscope was not triggered.'], 'scope')
             else:
                 scope.save_waveforms(f'cell_{cell_num:03d}_{datetime.now().strftime("%Y-%m-%d  %H-%M-%S")}')
 
@@ -296,13 +292,19 @@ try:
 
                 res_st = scope.measure_resistance_at(1, 2000)
                 res_lt = scope.measure_resistance_over(0)
-                cell_data.append({"num": cell_num, "res_st": res_st, "res_lt": res_lt})
+                cell_data.append({"num": cell_num, "v0": v0, "res_st": res_st, "res_lt": res_lt})
                 with open(f"{Settings['group_name']}.csv", 'a', newline = '') as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow([f'{cell_num:03d}', res_st, res_lt])
+                    csvRow = []
+                    for i in range(len(header)):
+                        if header[i] == 'num':
+                            csvRow.append(f"{cell_data[-1]['num']:03d}")
+                        else:
+                            csvRow.append(f'{cell_data[-1][header[i]]}')
+                    writer.writerow(csvRow)
                 cells_tested = len(cell_data)
-                cell_data_sorted_st = sorted(cell_data, key=lambda k: k['res_st'])
-                cell_data_sorted_lt = sorted(cell_data, key=lambda k: k['res_lt'])
+                cell_data_sorted_st = sorted(cell_data, key=lambda k: k['res_st'], reverse = True)
+                cell_data_sorted_lt = sorted(cell_data, key=lambda k: k['res_lt'], reverse = True)
                 # find the rank of the current cell
                 rank_st = rank_lt = 0
                 for i in range(cells_tested):
@@ -313,9 +315,10 @@ try:
                 print(f'              2 kHz             {Settings["i_sequence"][1][0]} sec')
                 print(f'Resistance: {res_st * 1000 :.3f}e-3         {res_lt * 1000 :.3f}e-3')
                 print(f'Rank:        {rank_st} of {cells_tested}            {rank_lt} of {cells_tested}')
-                print(f'Percentile:   {rank_st / cells_tested * 100:.0f}%               {rank_lt / cells_tested * 100:.0f}%\n')
+                print(f'Percentile:   {(cells_tested - rank_st) / (cells_tested - 1) * 100:.0f}%               {(cells_tested - rank_lt) / (cells_tested - 1) * 100:.0f}%\n')
 
                 # scope.cd('..')      # go back up a directory
+
 finally:
     load.write('INP 0')
     scope.restore_settings()
