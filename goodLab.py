@@ -10,8 +10,10 @@ Settings = {
     # test parameters
     "v_min" : 2.5,
     "v_max" : 4.2,
-    "i_sequence" : [[10, 0],[20, 20]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
+    "i_sequence" : [[0.5, 10, 0.5],[20, 20, 20]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
+    "measure_res_at" : [[1, 2000], [2, 2000], [2, 'min']],    # [step, freq(Hz)] or [[step, 'min']] to use full duration of step
     "slew_rate" : 0.1,      # A/us
+
     # oscilloscope settings
     "v_channel" : 1,    # which Oscope channel is measuring cell voltage?
     "i_channel" : 2,    # which Oscope channel is connected to current monitor output on the load?
@@ -32,8 +34,7 @@ def log(str):
 def errors(str_list, source = ''):
     for str in str_list:
         str = f'ERROR:{source}: {str}'
-        log(str)
-        print(str)
+        debug(str, True)
     return
 
 class Load:
@@ -200,6 +201,19 @@ class Oscope:
         self.write(f'SAVE:WAVEFORM CH{Settings["v_channel"]}, "{filename}_V.mat"')
         self.write(f'SAVE:WAVEFORM CH{Settings["i_channel"]}, "{filename}_I.mat"')
 
+def calc_res():
+    st_res = []
+    for i in range(len(Settings['measure_res_at'])):
+        if Settings['measure_res_at'][i][1] == 'min':
+            res1 = scope.measure_resistance_over(Settings['measure_res_at'][i][0] - 1)
+            res2 = scope.measure_resistance_over(Settings['measure_res_at'][i][0])
+            lt_res = (res1 + res2) / 2
+        else:
+            st_res.append(scope.measure_resistance_at(Settings['measure_res_at'][i][0], Settings['measure_res_at'][i][1]))
+            if i == len(Settings['measure_res_at']) - 1:
+                st_res = sum(st_res) / len(st_res)
+    return st_res, lt_res
+
 
 #############################################################################################################
 
@@ -290,8 +304,7 @@ try:
                 if dip_v < Settings['v_min']:
                     debug(f'OMG! Cell voltage dipped to {dip_v:.2f} which is below minimum!', True)
 
-                res_st = scope.measure_resistance_at(1, 2000)
-                res_lt = scope.measure_resistance_over(0)
+                res_st, res_lt = calc_res()
                 cell_data.append({"num": cell_num, "v0": v0, "res_st": res_st, "res_lt": res_lt})
                 with open(f"{Settings['group_name']}.csv", 'a', newline = '') as csvfile:
                     writer = csv.writer(csvfile)
