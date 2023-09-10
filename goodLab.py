@@ -229,13 +229,20 @@ class Oscope:
 
 def calc_res():
     st_res_list = []
+    lt_res_list = []
+    max_lt_res_dur = 0
     for i in range(len(Settings['measure_res_at'])):
         if Settings['measure_res_at'][i][1] == 'min':
-            lt_res = scope.measure_resistance_over(Settings['measure_res_at'][i][0])
+            if Settings['measure_res_at'][i][0] > max_lt_res_dur:
+                max_lt_res_dur = Settings['measure_res_at'][i][0]
+                lt_res_list = scope.measure_resistance_over(Settings['measure_res_at'][i][0])
+            elif Settings['measure_res_at'][i][0] == 0:
+                lt_res_list.append(scope.measure_resistance_over(Settings['measure_res_at'][i][0]))
         else:
             st_res_list.append(scope.measure_resistance_at(Settings['measure_res_at'][i][0], Settings['measure_res_at'][i][1]))
         if i == len(Settings['measure_res_at']) - 1:
             st_res = sum(st_res_list) / len(st_res_list)
+            lt_res = sum(lt_res_list) / len(lt_res_list)
     return st_res, lt_res
 
 
