@@ -4,6 +4,7 @@ import os
 import csv
 from datetime import datetime
 import sys
+import subprocess
 
 Settings = {
     "group_name" : "G7_2023",
@@ -216,11 +217,11 @@ class Oscope:
             self.write('SEARCH:SEARCH1:NAV NEXT')
             num_results = int(self.ll_query('SEARCH:SEARCH1:TOTAL?'))
             for i in range(num_results):
-                self.write('SEARCH:SEARCH1:NAV PREVious')
+                self.write('SEARCH:SEARCH1:NAVigate PREVious')
             for i in range(num_results):
-                percent = max(0, self.query_value('dis:wavev1:zoom:zoom1:hor:pos?') - self.query_value('hor:pos?'))
+                percent = max(0, self.query_value('DISplay:WAVEView1:ZOOM:ZOOM1:HORizontal:POSition?') - self.query_value('HORizontal:POSition?'))
                 self.actual_t_values.append((percent / 10) * self.query_value('HORizontal:MODE:SCAle?'))
-                self.write('SEARCH:SEARCH1:NAV NEXT')
+                self.write('SEARCH:SEARCH1:NAVigate NEXT')
         self.actual_t_values.sort()
         self.actual_t_values = list(set(self.actual_t_values))
 
@@ -297,6 +298,7 @@ try:
         with open(cell_data_path, 'w') as csvfile:
             csvfile.write('num,v0,res_st,res_lt\n')
             header = ['num','v0', 'res_st', 'res_lt']
+        subprocess.run(f'svn add {cell_data_path}', shell=True)
     else:
         with open(cell_data_path, 'r') as csvfile:
             reader = csv.reader(csvfile)
@@ -376,4 +378,5 @@ try:
 
 finally:
     load.write('INP 0')
+    subprocess.run(f'svn commit -m "Updated battery test data" {cell_data_path}', shell=True)
     scope.restore_settings()
