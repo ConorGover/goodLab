@@ -236,7 +236,7 @@ def calc_res():
             if Settings['measure_res_at'][i][0] > max_lt_res_dur:
                 max_lt_res_dur = Settings['measure_res_at'][i][0]
                 lt_res_list = scope.measure_resistance_over(Settings['measure_res_at'][i][0])
-            elif Settings['measure_res_at'][i][0] == 0:
+            else:
                 lt_res_list.append(scope.measure_resistance_over(Settings['measure_res_at'][i][0]))
         else:
             st_res_list.append(scope.measure_resistance_at(Settings['measure_res_at'][i][0], Settings['measure_res_at'][i][1]))
@@ -292,7 +292,7 @@ try:
     scope.cd(f"{path}\{Settings['group_name']}")
 
     cell_data = []
-    cell_data_path = f"{Settings['group_name']}\data.csv"
+    cell_data_path = f"{Settings['group_name']}.csv"
     if not os.path.exists(cell_data_path):     # make a CSV file for the data if it doesn't already exist
         with open(cell_data_path, 'w') as csvfile:
             csvfile.write('num,v0,res_st,res_lt\n')
@@ -312,7 +312,18 @@ try:
 #########################################################################################################################
 
     while True:
-        cell_num = int(input('\nEnter cell number: '))
+        try:
+            cell_num = cell_data[-1]['num'] + 1
+        except:
+            cell_num = 1
+        inp = input(f'Enter cell number or just hit enter to test cell {cell_num}')
+        if inp != '':
+            try:
+                cell_num = int(inp)
+            except:
+                errors([f'"{inp}" is not a valid number.'])
+                continue
+        
         try:
             all_lt_res = [cell['res_lt'] for cell in cell_data]
             mean_lt_res = sum(all_lt_res) / len(all_lt_res)
