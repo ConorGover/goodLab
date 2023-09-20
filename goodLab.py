@@ -11,7 +11,7 @@ Settings = {
     # test parameters
     "v_min" : 2.5,
     "v_max" : 4.2,
-    "i_sequence" : [[1, 10, 1],[2, 2, 2]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
+    "i_sequence" : [[1, 10, 1],[2, 20, 2]],    # [[i0, i1, i2...], [t0, t1, t2...]] in A and s respectively
     "measure_res_at" : [[1, 2000], [2, 2000], [1, 'min']],    # [step, freq(Hz)] or [[step, 'min']] to use full duration of step
     "slew_rate" : 0.1,      # A/us
 
@@ -234,9 +234,9 @@ def calc_res():
     max_lt_res_dur = 0
     for i in range(len(Settings['measure_res_at'])):
         if Settings['measure_res_at'][i][1] == 'min':
-            if Settings['measure_res_at'][i][0] > max_lt_res_dur:
-                max_lt_res_dur = Settings['measure_res_at'][i][0]
-                lt_res_list = scope.measure_resistance_over(Settings['measure_res_at'][i][0])
+            if Settings['i_sequence'][1][Settings['measure_res_at'][i][0]] > max_lt_res_dur:
+                max_lt_res_dur = Settings['i_sequence'][1][Settings['measure_res_at'][i][0]]
+                lt_res_list = [scope.measure_resistance_over(Settings['measure_res_at'][i][0])]
             else:
                 lt_res_list.append(scope.measure_resistance_over(Settings['measure_res_at'][i][0]))
         else:
@@ -298,7 +298,7 @@ try:
         with open(cell_data_path, 'w') as csvfile:
             csvfile.write('num,v0,res_st,res_lt\n')
             header = ['num','v0', 'res_st', 'res_lt']
-        subprocess.run(f'svn add {cell_data_path}', shell=True)
+        subprocess.run(f'svn add {cell_data_path}')
     else:
         with open(cell_data_path, 'r') as csvfile:
             reader = csv.reader(csvfile)
@@ -315,10 +315,10 @@ try:
 
     while True:
         try:
-            cell_num = cell_data[-1]['num'] + 1
+            cell_num = int(cell_data[-1]['num'] + 1)
         except:
             cell_num = 1
-        inp = input(f'Enter cell number or just hit enter to test cell {cell_num}')
+        inp = input(f'Enter cell number or just hit enter to test cell {cell_num}  ')
         if inp != '':
             try:
                 cell_num = int(inp)
@@ -339,7 +339,7 @@ try:
                 inp = input(f'Cell voltage is only {v0:.2f}. It may drop below the minimum of {Settings["v_min"]:.2f}. Continue? [Y/N]')
         if inp == 'Y' or inp == 'y' or inp == {}:
             scope.set_v_range(Settings['v_channel'], expected_min_v - 0.2, v0 + 0.1)
-            sleep(1)    # changing the voltage range makes the scope untriggerable for half a second
+            sleep(2)    # changing the voltage range makes the scope untriggerable for half a second
             times = scope.times_triggered()
             load.trigger()
             if not scope.times_triggered() > times:
@@ -379,4 +379,4 @@ try:
 finally:
     load.write('INP 0')
     subprocess.run(f'svn commit -m "Updated battery test data" {cell_data_path}', shell=True)
-    scope.restore_settings()
+    # scope.restore_settings()
