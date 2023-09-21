@@ -339,7 +339,7 @@ try:
                 inp = input(f'Cell voltage is only {v0:.2f}. It may drop below the minimum of {Settings["v_min"]:.2f}. Continue? [Y/N]')
         if inp == 'Y' or inp == 'y' or inp == {}:
             scope.set_v_range(Settings['v_channel'], expected_min_v - 0.2, v0 + 0.1)
-            sleep(2)    # changing the voltage range makes the scope untriggerable for half a second
+            sleep(2)    # changing the voltage range makes the scope untriggerable for a second
             times = scope.times_triggered()
             load.trigger()
             if not scope.times_triggered() > times:
@@ -375,6 +375,9 @@ try:
                 print(f'Resistance: {(res_st * 1000):.3f}e-3         {(res_lt * 1000):.3f}e-3')
                 print(f'Rank:        {rank_st} of {cells_tested}            {rank_lt} of {cells_tested}')
                 print(f'Percentile:   {((cells_tested - rank_st) / max(1, (cells_tested - 1)) * 100):.0f}%               {(cells_tested - rank_lt) / max(1, (cells_tested - 1)) * 100:.0f}%\n')
+
+except Exception as err:
+    log(f"{err}: {type(err)}\r\n")
 
 finally:
     load.write('INP 0')
