@@ -146,7 +146,7 @@ class Oscope:
         secs = secs + 1
         sec_per_div = secs / 10
         self.write(f'HORizontal:MODE:SCAle {sec_per_div:.4E}')
-        self.write(f'HORizontal:POSition {(100 * 0.5 / secs):.4E}')    # set the trigger position to 50% of the way through the acquisition
+        self.write(f'HORizontal:POSition {(100 * 0.5 / secs):.4E}')
 
     def set_v_range(self, channel:int, v_min:float, v_max:float):
         v_range = v_max - v_min
@@ -215,6 +215,8 @@ class Oscope:
                 self.write('SEARCH:SEARCH1:TRIGGER:A:EDGE:SLOPE FALL')
             self.write(f"SEARCH:SEARCH1:TRIGGER:A:EDGE:THRESHOLD {midpoints[i] / Settings['i_scale_factor']}")
             self.write('SEARCH:SEARCH1:NAV NEXT')
+
+            # this is a very hacky way to get the time values, but it's necessary to work around a bug in the scope software
             num_results = int(self.ll_query('SEARCH:SEARCH1:TOTAL?'))
             for i in range(num_results):
                 self.write('SEARCH:SEARCH1:NAVigate PREVious')
@@ -222,6 +224,7 @@ class Oscope:
                 percent = max(0, self.query_value('DISplay:WAVEView1:ZOOM:ZOOM1:HORizontal:POSition?') - self.query_value('HORizontal:POSition?'))
                 self.actual_t_values.append((percent / 10) * self.query_value('HORizontal:MODE:SCAle?'))
                 self.write('SEARCH:SEARCH1:NAVigate NEXT')
+                
         self.actual_t_values.sort()
         self.actual_t_values = list(set(self.actual_t_values))
 
