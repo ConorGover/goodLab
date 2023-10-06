@@ -67,24 +67,42 @@ class Load:
 
     def write(self, str:str):
         debug(f'    sending to load: {str}')
-        self.load_res.write(str)
-        sleep(0.1)
+        done = False
+        while not done:
+            try:
+                self.load_res.write(str)
+                sleep(0.2)
+            except Exception as oops:
+                log(f"{oops}: {type(oops)}\r\n")
+                sleep(0.2)
+                continue
+            else:
+                done = True
         err = self.ll_query('SYSTem:ERRor?').split(',')
         while (err[0] != '0'):
             errors(err, 'load')
-            sleep(0.1)
             err = self.ll_query('SYSTem:ERRor?')
 
     def ll_query(self, str:str):
+        done = False
         debug(f'    asking load: {str}')
-        reply = self.load_res.query(str)
+        while not done:
+            try:
+                reply = self.load_res.query(str)
+                sleep(0.2)
+            except Exception as oops:
+                log(f"{oops}: {type(oops)}\r\n")
+                sleep(0.2)
+                continue
+            else:
+                done = True
         debug(f'    load replied: {reply}')
         return reply
 
     def trigger(self):
         self.write('INP 1')     # we have to enable input, otherwise it'll run through the list but not actually draw any current
         self.write('*TRG')    # this starts the list
-        sleep(sum(Settings['i_sequence'][1]) + 1.5)   # wait for the list to finish
+        sleep(sum(Settings['i_sequence'][1]) + 2)   # wait for the list to finish
         self.write('INP 0')    # disable input again just to be safe
 
     def i(self):
@@ -145,25 +163,25 @@ class Oscope:
     def set_acq_duration_s(self, secs:float):
         secs = secs + 1
         sec_per_div = secs / 10
-        self.write(f'HORizontal:MODE:SCAle {sec_per_div:.4E}')
-        self.write(f'HORizontal:POSition {(100 * 0.5 / secs):.4E}')
+        self.write(f'HORizontal:MODE:SCAle {sec_per_div:.13E}')
+        self.write(f'HORizontal:POSition {(100 * 0.5 / secs):.13E}')    # set the trigger position to 50% of the way through the acquisition
 
     def set_v_range(self, channel:int, v_min:float, v_max:float):
         v_range = v_max - v_min
         v_per_div = v_range / 10
-        self.write(f'CH{channel}:SCAle {v_per_div:.4E}')
+        self.write(f'CH{channel}:SCAle {v_per_div:.13E}')
         pos_offset = -1 * (5 + v_min / v_per_div)
         if -10 < pos_offset < 10:
             self.write(f'CH{channel}:POSition {-1 * (5 + v_min / v_per_div)}')
         else:
-            self.write(f'CH{channel}:OFFSET {(v_range / 2 + v_min):.4E}')
+            self.write(f'CH{channel}:OFFSET {(v_range / 2 + v_min):.13E}')
 
     def measure_resistance_at(self, step:int, freq:float):
         actual_time = self.actual_t_values[step]
         a_time = actual_time - (self.di[step] / (Settings["slew_rate"] * 1e6)) / 2 - (1 / freq)
         b_time = actual_time + (self.di[step] / (Settings["slew_rate"] * 1e6)) / 2 + (1 / freq)
-        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.4E}')
-        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.4E}')
+        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.13E}')
+        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.13E}')
         dv = self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?')
 
         return dv / abs(self.di[step])
@@ -173,8 +191,8 @@ class Oscope:
         actual_b_time = self.actual_t_values[step + 1]
         a_time = actual_a_time - 1e-3
         b_time = actual_b_time - 1e-3
-        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.4E}')
-        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.4E}')
+        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:APOSition {a_time:.13E}')
+        self.write(f'DISplay:WAVEView1:CURSor:CURSOR1:VBArs:BPOSition {b_time:.13E}')
         dv = self.query_value('DISplay:WAVEView1:CURSor:CURSOR1:HBArs:DELTa?')
 
         return dv / abs(self.di[step])
@@ -225,6 +243,7 @@ class Oscope:
                 self.actual_t_values.append((percent / 10) * self.query_value('HORizontal:MODE:SCAle?'))
                 self.write('SEARCH:SEARCH1:NAVigate NEXT')
                 
+        # self.write('DISplay:WAVEView1:ZOOM:ZOOM1:STATe 0')        # this causes the lt res. measurement to be wrong. wtf?
         self.actual_t_values.sort()
         self.actual_t_values = list(set(self.actual_t_values))
 
@@ -312,7 +331,7 @@ try:
         debug(f'Loaded previous test data for {len(cell_data)} cells.', True)
 
     trig_level = Settings['i_sequence'][0][0] / (2 * Settings['i_scale_factor'])
-    scope.write(f'TRIGger:A:LEVel:CH{Settings["i_channel"]} {trig_level:.4E}')
+    scope.write(f'TRIGger:A:LEVel:CH{Settings["i_channel"]} {trig_level:.13E}')
 
 #########################################################################################################################
 
@@ -354,6 +373,9 @@ try:
 
                 scope.find_edges()
                 res_st, res_lt = calc_res()
+
+                scope.save_waveforms(cell_num)
+
                 cell_data.append({"num": cell_num, "v0": v0, "res_st": res_st, "res_lt": res_lt})
                 with open(cell_data_path, 'a', newline = '') as csvfile:
                     writer = csv.writer(csvfile)
@@ -381,6 +403,7 @@ try:
 
 except Exception as err:
     log(f"{err}: {type(err)}\r\n")
+    input('Something went wrong I guess. ¯\_(ツ)_/¯\n\r Hit enter to quit, then you can try restarting GoodLab.')
 
 finally:
     load.write('INP 0')
