@@ -222,7 +222,7 @@ class Oscope:
         self.di = [i_sequence[i + 1] - i_sequence[i] for i in range(len(i_sequence) - 1)]
         midpoints = [i_sequence[i] + (self.di[i] / 2) for i in range(len(i_sequence) - 1)]
 
-        self.actual_t_values = [0]
+        self.actual_t_values = [0.0]
         self.write('ACQuire:STATE STOP')
 
         self.write(f'SEARCH:SEARCH1:TRIGGER:A:EDGE:SOURCE CH{Settings["i_channel"]}')
@@ -310,9 +310,9 @@ try:
     scope.set_acq_duration_s(duration_s)
     scope.set_v_range(Settings['i_channel'], -0.1, (max(Settings['i_sequence'][0]) / Settings['i_scale_factor']) + 1)
 
-    if not os.path.exists(f"{path}\{Settings['group_name']}"):     # make a folder for the data if it doesn't already exist
+    if not os.path.exists(os.path.join(path, Settings['group_name'])):  # make a folder for the data if it doesn't already exist
         scope.mkdir(f"{Settings['group_name']}")
-    scope.cd(f"{path}\{Settings['group_name']}")
+    scope.cd(os.path.join(path, Settings['group_name']))
 
     cell_data = []
     cell_data_path = f"{Settings['group_name']}.csv"
@@ -374,7 +374,7 @@ try:
                 scope.find_edges()
                 res_st, res_lt = calc_res()
 
-                scope.save_waveforms(cell_num)
+                scope.save_waveforms(str(cell_num))
 
                 cell_data.append({"num": cell_num, "v0": v0, "res_st": res_st, "res_lt": res_lt})
                 with open(cell_data_path, 'a', newline = '') as csvfile:
