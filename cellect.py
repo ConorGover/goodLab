@@ -2,11 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 CELL_DATA_PATH = 'G7_2023.csv'
-MODULES = 35
 CELLS_PER_MODULE = 12
 
 def read_cells(filename):
-    cells = np.genfromtxt(filename, delimiter=',', names=True, dtype=None, encoding=None)
+    cells = np.genfromtxt(fname=filename, delimiter=',', names=True, dtype=None)
     cells = np.array([(cell['num'], cell['v0'], cell['res_st'], cell['res_lt'] - cell['res_st']) for cell in cells], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8')])
     
     for i, cell in enumerate(cells):
@@ -44,10 +43,12 @@ def process_cells(cells):
     print('Number of cells remaining:', len(cells))
 
     # plot the distribution of dev_st
-    # plt.hist(dev_st, bins=20)
-    # plt.xlabel('Deviation from mean')
-    # plt.ylabel('Number of cells')
-    # plt.show()
+    plt.hist(dev_st, bins=40)
+    plt.xlabel('Deviation from mean')
+    plt.ylabel('Number of cells')
+    plt.tight_layout()
+    plt.savefig('dev_st distribution')
+    plt.clf()
 
     median_lt = np.median(cells['lt'])
     cells = np.array([(cell['num'], cell['v0'], cell['st'], cell['lt'], dev_st[i], dev_lt[i], max(dev_lt[i], dev_st[i]), largest_dev[i], cell['lt'] - median_lt, 0) for i, cell in enumerate(cells)], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8'), ('dev_st', 'f8'), ('dev_lt', 'f8'), ('dev', 'f8'), ('largest_dev', 'U2'), ('dist', 'f8'), ('mod', 'i8')])
@@ -58,8 +59,10 @@ def process_cells(cells):
 def assign_to_modules(cells, starting_module=1):
     cells = np.sort(cells, order='dist')
     total = len(cells)
+
     # find the index of the cell with dist closest to 0
     median_index = np.argmin(np.abs(cells['dist']))
+    
     # adjust the center to be a multiple of CELLS_PER_MODULE so we can match as many cells as possible
     dist_start_to_middle = median_index - CELLS_PER_MODULE // 2
     dist_middle_to_end = total - median_index + CELLS_PER_MODULE // 2
@@ -115,6 +118,7 @@ cells, total_modules = assign_to_modules(cells, 1)
 # find cells that are not assigned to any module
 unused = cells[cells['mod'] == 0]
 cells = cells[cells['mod'] != 0]
+
 # add the bad cells to the unused list
 unused = np.concatenate((unused, bad_cells))
 unused = np.sort(unused, order='dist')
@@ -125,7 +129,8 @@ cells_sorted = np.concatenate((cells, unused))
 plt.scatter(cells_sorted['mod'], cells_sorted['dist'])
 plt.xlabel('Module')
 plt.ylabel('Distance from median')
-plt.show()
+plt.tight_layout()
+plt.savefig('deviations by module')
 
 np.savetxt('useless_details--NOT_important--DO_NOT_READ.csv', cells_sorted, delimiter=',', header='num,v0,st,lt,dev_st,dev_lt,dev,largest_dev,dist,mod', fmt='%i,%f,%f,%f,%f,%f,%f,%s,%f,%i')
 
