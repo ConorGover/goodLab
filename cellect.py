@@ -69,25 +69,19 @@ def assign_to_modules(cells, starting_module=1):
     # find the index of the cell with dist closest to 0
     median_index = np.argmin(np.abs(cells['dist']))
     
-    # adjust the center to be a multiple of CELLS_PER_MODULE so we can match as many cells as possible
-    dist_start_to_middle = median_index - CELLS_PER_MODULE // 2
-    dist_middle_to_end = total - median_index + CELLS_PER_MODULE // 2
-    remaining_end = (total - dist_middle_to_end) % CELLS_PER_MODULE
-    remaining_start = dist_start_to_middle % CELLS_PER_MODULE
-    if remaining_start <= remaining_end:
-        center = median_index - remaining_start
-    else:
-        center = median_index + remaining_end
+
+    center = median_index - CELLS_PER_MODULE // 2
 
     mod = 1
-    lower = center - CELLS_PER_MODULE // 2
-    upper = center + CELLS_PER_MODULE // 2
+    lower = round(center - CELLS_PER_MODULE // 2)
+    upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
     up_or_down = 1
+    
     while lower >= 0 and upper <= total:
         cells[lower:upper]['mod'] = starting_module + mod - 1
         center += mod * up_or_down * CELLS_PER_MODULE
-        lower = center - CELLS_PER_MODULE // 2
-        upper = center + CELLS_PER_MODULE // 2
+        lower = round(center - CELLS_PER_MODULE // 2)
+        upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
         mod += 1
         up_or_down *= -1
 
@@ -95,22 +89,22 @@ def assign_to_modules(cells, starting_module=1):
 
     if lower < 0:
         center += mod * up_or_down * CELLS_PER_MODULE
-        lower = center - CELLS_PER_MODULE // 2
-        upper = center + CELLS_PER_MODULE // 2
+        lower = round(center - CELLS_PER_MODULE // 2)
+        upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
         while upper <= total:
             cells[lower:upper]['mod'] = starting_module + mod - 1
             center += CELLS_PER_MODULE
-            lower = center - CELLS_PER_MODULE // 2
-            upper = center + CELLS_PER_MODULE // 2
+            lower = round(center - CELLS_PER_MODULE // 2)
+            upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
             mod += 1
     elif upper > total:
-        upper = center + CELLS_PER_MODULE // 2
-        lower = center - CELLS_PER_MODULE // 2
+        lower = round(center - CELLS_PER_MODULE // 2)
+        upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
         while lower >= 0:
             cells[lower:upper]['mod'] = starting_module + mod - 1
             center -= CELLS_PER_MODULE
-            lower = center - CELLS_PER_MODULE // 2
-            upper = center + CELLS_PER_MODULE // 2
+            lower = round(center - CELLS_PER_MODULE // 2)
+            upper = round(center + np.ceil(CELLS_PER_MODULE / 2))
             mod += 1
 
     total_modules = mod - 1
@@ -128,7 +122,8 @@ cells = cells[cells['mod'] != 0]
 # add the bad cells to the unused list
 unused = np.concatenate((unused, bad_cells))
 unused = np.sort(unused, order='dist')
-unused = assign_to_modules(unused, total_modules + 1)[0]
+unused, bad_modules = assign_to_modules(unused, total_modules + 1)
+total_modules += bad_modules
 
 cells_sorted = np.concatenate((cells, unused))
 
@@ -141,7 +136,7 @@ plt.savefig('deviations by module')
 np.savetxt('useless_details--NOT_important--DO_NOT_READ.csv', cells_sorted, delimiter=',', header='num,v0,st,lt,dev_st,dev_lt,dev,largest_dev,dist,abs_dist,mod', fmt='%i,%f,%f,%f,%f,%f,%f,%s,%f,%f,%i')
 
 with open ('module_list.txt', 'w') as file:
-    for mod in range(1, len(cells_sorted) // CELLS_PER_MODULE + 1):
+    for mod in range(1, total_modules + 1):
         file.write(f'Module {mod}: ')
         cells_in_mod = [cell['num'] for cell in cells_sorted if cell['mod'] == mod]
         cells_in_mod.sort()
@@ -157,3 +152,5 @@ with open ('cell_list.txt', 'w') as file:
     cells_sorted.sort(order='num')
     for cell in cells_sorted:
         file.write(f'Cell {cell["num"]}: module {cell["mod"] if cell["mod"] != 0 else 'NONE'}\n')
+
+print(f'Modules generated: {total_modules}')
