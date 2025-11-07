@@ -38,8 +38,18 @@ def process_cells(cells):
     bc_dev_st = np.abs(bad_cells['st'] - avg_st) / avg_st
     bc_dev_lt = np.abs(bad_cells['lt'] - fit(bad_cells['v0'])) / fit(bad_cells['v0'])
     bc_largest_dev = np.where(bc_dev_st > bc_dev_lt, 'st', 'lt')
+
+    median_lt = np.median(cells['lt'])
+    cells = np.array([(cell['num'], cell['v0'], cell['st'], cell['lt'], dev_st[i], dev_lt[i], max(dev_lt[i], dev_st[i]), largest_dev[i], cell['lt'] - median_lt, abs(cell['lt'] - median_lt), 0) for i, cell in enumerate(cells)], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8'), ('dev_st', 'f8'), ('dev_lt', 'f8'), ('dev', 'f8'), ('largest_dev', 'U2'), ('dist', 'f8'), ('abs_dist', 'f8'), ('mod', 'i8')])
+    bad_cells = np.array([(cell['num'], cell['v0'], cell['st'], cell['lt'], bc_dev_st[i], bc_dev_lt[i], max(bc_dev_lt[i], bc_dev_st[i]), bc_largest_dev[i], cell['lt'] - median_lt, abs(cell['lt'] - median_lt), 0) for i, cell in enumerate(bad_cells)], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8'), ('dev_st', 'f8'), ('dev_lt', 'f8'), ('dev', 'f8'), ('largest_dev', 'U2'), ('dist', 'f8'), ('abs_dist', 'f8'), ('mod', 'i8')])
     
-    print('Number of cells removed:', len(bad_cells))
+    cells = np.sort(cells, order='abs_dist')
+    
+    while (len(cells) % CELLS_PER_MODULE > 0):
+        bad_cells = np.concatenate((bad_cells, [cells[-1]]))
+        cells = np.delete(cells, -1)
+    
+    print('Number of cells excluded:', len(bad_cells))
     print('Number of cells remaining:', len(cells))
 
     # plot the distribution of dev_st
@@ -50,10 +60,6 @@ def process_cells(cells):
     plt.savefig('dev_st distribution')
     plt.clf()
 
-    median_lt = np.median(cells['lt'])
-    cells = np.array([(cell['num'], cell['v0'], cell['st'], cell['lt'], dev_st[i], dev_lt[i], max(dev_lt[i], dev_st[i]), largest_dev[i], cell['lt'] - median_lt, 0) for i, cell in enumerate(cells)], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8'), ('dev_st', 'f8'), ('dev_lt', 'f8'), ('dev', 'f8'), ('largest_dev', 'U2'), ('dist', 'f8'), ('mod', 'i8')])
-    bad_cells = np.array([(cell['num'], cell['v0'], cell['st'], cell['lt'], bc_dev_st[i], bc_dev_lt[i], max(bc_dev_lt[i], bc_dev_st[i]), bc_largest_dev[i], cell['lt'] - median_lt, 0) for i, cell in enumerate(bad_cells)], dtype=[('num', 'i8'), ('v0', 'f8'), ('st', 'f8'), ('lt', 'f8'), ('dev_st', 'f8'), ('dev_lt', 'f8'), ('dev', 'f8'), ('largest_dev', 'U2'), ('dist', 'f8'), ('mod', 'i8')])
-    
     return cells, bad_cells
 
 def assign_to_modules(cells, starting_module=1):
@@ -132,7 +138,7 @@ plt.ylabel('Distance from median')
 plt.tight_layout()
 plt.savefig('deviations by module')
 
-np.savetxt('useless_details--NOT_important--DO_NOT_READ.csv', cells_sorted, delimiter=',', header='num,v0,st,lt,dev_st,dev_lt,dev,largest_dev,dist,mod', fmt='%i,%f,%f,%f,%f,%f,%f,%s,%f,%i')
+np.savetxt('useless_details--NOT_important--DO_NOT_READ.csv', cells_sorted, delimiter=',', header='num,v0,st,lt,dev_st,dev_lt,dev,largest_dev,dist,abs_dist,mod', fmt='%i,%f,%f,%f,%f,%f,%f,%s,%f,%f,%i')
 
 with open ('module_list.txt', 'w') as file:
     for mod in range(1, len(cells_sorted) // CELLS_PER_MODULE + 1):
